@@ -15,7 +15,7 @@
 #include "util_macro.S"
 
 .set LOW_HYST_BIT,7
-.set SENSE_BUF_SIZE,20
+.set SENSE_BUF_SIZE,128
     
     .bss
     .global gpio_num
@@ -36,6 +36,9 @@ edge_count: .long 0
     .global continue_count
 continue_count: .long 0
 
+    .global predecessing_zero
+predecessing_zero: .long 0
+    
     .global sense_count
 sense_count: .long 0
 
@@ -45,7 +48,7 @@ sense_data: .long 0
     .skip SENSE_BUF_SIZE
     
 stack:
-    .skip 100
+    .skip 32
     .global stackEnd
 stackEnd:
     .long 0

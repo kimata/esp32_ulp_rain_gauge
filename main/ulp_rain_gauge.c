@@ -44,8 +44,9 @@
 #define FLUENTD_TAG     "/test"       // Fluentd tag
 
 #define WIFI_HOSTNAME   "ESP32-rain"    // module's hostname
-#define SENSE_INTERVAL  10               // sensing interval
-#define SENSE_COUNT     5               // buffering count
+#define SENSE_INTERVAL  10              // sensing interval
+#define SENSE_BUF_COUNT 5               // buffering count
+#define SENSE_BUF_MAX   60              // max buffering count
 
 #define ADC_VREF        1128            // ADC calibration data
 
@@ -140,7 +141,7 @@ static cJSON *sense_json(uint32_t battery_volt, wifi_ap_record_t *ap_record,
 
     cJSON *root = cJSON_CreateArray();
 
-    for (uint32_t i = 0; i < SENSE_COUNT; i++) {
+    for (uint32_t i = 0; i < ulp_sense_count; i++) {
         cJSON *item = cJSON_CreateObject();
         cJSON_AddNumberToObject(item, "rain", sense_data[i].rainfall);
         cJSON_AddStringToObject(item, "hostname", WIFI_HOSTNAME);
@@ -296,6 +297,52 @@ static void init_ulp_program()
 }
 
 //////////////////////////////////////////////////////////////////////
+// Sensing
+static bool sense_data_all_zero()
+{
+    sense_data_t *sense_data = (sense_data_t *)&ulp_sense_data;
+
+    for (uint32_t i = 0; i < ulp_sense_count; i++) {
+        if (sense_data[i].rainfall != 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool handle_ulp_sense_data()
+{
+    uint16_t edge_count;
+
+    edge_count = ulp_edge_count;
+    ulp_edge_count = 0;
+
+    sense_data_t *sense_data = (sense_data_t *)&ulp_sense_data;
+
+    sense_data[ulp_sense_count++].rainfall = edge_count;
+    ulp_edge_count = 0;
+
+    // check if it began to rain
+    if ((edge_count != 0) && ulp_predecessing_zero) {
+        ulp_predecessing_zero = false;
+        return true;
+    }
+    // check if it is raining and buffer is filled
+    if ((ulp_sense_count >= SENSE_BUF_COUNT) && (!sense_data_all_zero())) {
+        ulp_predecessing_zero = false;
+        return true;
+    }
+
+    // check if the buffer is full
+    if (ulp_sense_count >= SENSE_BUF_MAX) {
+        ulp_predecessing_zero = sense_data_all_zero();
+        return true;
+    }
+
+    return false;
+}
+
+//////////////////////////////////////////////////////////////////////
 void app_main()
 {
     uint32_t time_start;
@@ -309,12 +356,7 @@ void app_main()
     esp_log_level_set("wifi", ESP_LOG_ERROR);
 
     if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER) {
-        sense_data_t *sense_data = (sense_data_t *)&ulp_sense_data;
-
-        sense_data[ulp_sense_count++].rainfall = ulp_edge_count;
-        ulp_edge_count = 0;
-
-        if (ulp_sense_count == SENSE_COUNT) {
+        if (handle_ulp_sense_data()) {
             time_start = xTaskGetTickCount();
             init_wifi();
             if (wifi_connect() == ESP_OK) {
@@ -322,6 +364,7 @@ void app_main()
                 process_sense_data(connect_msec, battery_volt);
             }
             wifi_disconnect();
+            ulp_predecessing_zero = 1;
             ulp_sense_count = 0;
         }
     } else {
@@ -333,18 +376,3 @@ void app_main()
     ESP_ERROR_CHECK(esp_deep_sleep_enable_timer_wakeup(SENSE_INTERVAL * 1000000LL));
     esp_deep_sleep_start();
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
