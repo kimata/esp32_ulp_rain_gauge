@@ -1,4 +1,4 @@
-# ULP rain gaufe application
+# ULP rain gauge application
 
 This software count the pulse of rain gauge output and send those values to
 Fluentd.
