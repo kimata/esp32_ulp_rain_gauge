@@ -44,7 +44,7 @@
 #define FLUENTD_TAG     "/test"       // Fluentd tag
 
 #define WIFI_HOSTNAME   "ESP32-rain"    // module's hostname
-#define SENSE_INTERVAL  10              // sensing interval
+#define SENSE_INTERVAL  60              // sensing interval
 #define SENSE_BUF_COUNT 5               // buffering count
 #define SENSE_BUF_MAX   60              // max buffering count
 
@@ -357,6 +357,7 @@ void app_main()
 
     if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER) {
         if (handle_ulp_sense_data()) {
+            ESP_LOGI(TAG, "Send to fluentd");
             time_start = xTaskGetTickCount();
             init_wifi();
             if (wifi_connect() == ESP_OK) {
@@ -364,7 +365,6 @@ void app_main()
                 process_sense_data(connect_msec, battery_volt);
             }
             wifi_disconnect();
-            ulp_predecessing_zero = 1;
             ulp_sense_count = 0;
         }
     } else {

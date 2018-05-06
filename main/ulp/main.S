@@ -15,7 +15,7 @@
 #include "util_macro.S"
 
 .set LOW_HYST_BIT,7
-.set SENSE_BUF_SIZE,128
+.set SENSE_BUF_SIZE,256
     
     .bss
     .global gpio_num
