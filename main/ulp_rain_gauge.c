@@ -1,7 +1,7 @@
 /*
- * ESP32 ULP SHT3x Application
+ * ESP32 ULP Rain Gauge Application
   *
- * Copyright (C) 2017 KIMATA Tetsuya <kimata@green-rabbit.net>
+ * Copyright (C) 2018 KIMATA Tetsuya <kimata@green-rabbit.net>
  *
  * This program is free software ; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License as
@@ -143,7 +143,7 @@ static cJSON *sense_json(uint32_t battery_volt, wifi_ap_record_t *ap_record,
 
     for (uint32_t i = 0; i < ulp_sense_count; i++) {
         cJSON *item = cJSON_CreateObject();
-        cJSON_AddNumberToObject(item, "rain", sense_data[i].rainfall);
+        cJSON_AddNumberToObject(item, "rain", sense_data[i].rainfall * 0.5);
         cJSON_AddStringToObject(item, "hostname", WIFI_HOSTNAME);
         cJSON_AddNumberToObject(item, "self_time", SENSE_INTERVAL * i); // negative offset
 
