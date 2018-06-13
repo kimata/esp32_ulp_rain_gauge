@@ -13,16 +13,20 @@
 #include "soc/sens_reg.h"
 #include "driver/gpio.h"
 #include "driver/rtc_io.h"
+#include "driver/adc.h"
 #include "lwip/sockets.h"
+
+#include "esp32/ulp.h"
 
 #define LOG_LOCAL_LEVEL ESP_LOG_INFO
 #include "esp_log.h"
-#include "esp_wifi.h"
-#include "esp_event_loop.h"
-#include "esp_task_wdt.h"
+
 #include "esp_adc_cal.h"
-#include "esp_deep_sleep.h"
-#include "esp32/ulp.h"
+#include "esp_event_loop.h"
+#include "esp_sleep.h"
+#include "esp_spi_flash.h"
+#include "esp_task_wdt.h"
+#include "esp_wifi.h"
 
 #include <stdlib.h>
 #include <stdbool.h>
@@ -37,23 +41,27 @@
 // #define WIFI_SSID "XXXXXXXX"            // WiFi SSID
 // #define WIFI_PASS "XXXXXXXX"            // WiFi Password
 
+/* #define ADC_CALIB_MODE */
+
 ////////////////////////////////////////////////////////////
 // Configuration
 #define FLUENTD_IP      "192.168.2.20"  // IP address of Fluentd
 #define FLUENTD_PORT    8888            // Port of FLuentd
-#define FLUENTD_TAG     "/test"       // Fluentd tag
+#define FLUENTD_TAG     "/sensor"       // Fluentd tag
 
 #define WIFI_HOSTNAME   "ESP32-rain"    // module's hostname
 #define SENSE_INTERVAL  60              // sensing interval
 #define SENSE_BUF_COUNT 5               // buffering count
+#define SENSE_BUF_FULL  30              // full buffering count
 #define SENSE_BUF_MAX   60              // max buffering count
 
-#define ADC_VREF        1128            // ADC calibration data
+#define ADC_VREF        1100            // ADC calibration data
 
 ////////////////////////////////////////////////////////////
-const gpio_num_t GAUGE_PIN    = GPIO_NUM_33;
+const gpio_num_t GAUGE_PIN    = GPIO_NUM_25;
+const uint16_t   GAUGE_PIN_ULP= 6;
 
-#define BATTERY_ADC_CH  ADC1_CHANNEL_4  // GPIO 32
+#define BATTERY_ADC_CH  ADC1_CHANNEL_5  // GPIO 33
 #define BATTERY_ADC_SAMPLE  33
 #define BATTERY_ADC_DIV  1
 
@@ -76,6 +84,30 @@ extern const uint8_t ulp_main_bin_end[]   asm("_binary_ulp_main_bin_end");
     "json=%s"
 
 SemaphoreHandle_t wifi_conn_done = NULL;
+
+//////////////////////////////////////////////////////////////////////
+// Error Handling
+static void _error_check_failed(esp_err_t rc, const char *file, int line,
+                                const char *function, const char *expression)
+{
+    ets_printf("ESP_ERROR_CHECK failed: esp_err_t 0x%x", rc);
+#ifdef CONFIG_ESP_ERR_TO_NAME_LOOKUP
+    ets_printf(" (%s)", esp_err_to_name(rc));
+#endif //CONFIG_ESP_ERR_TO_NAME_LOOKUP
+    ets_printf(" at 0x%08x\n", (intptr_t)__builtin_return_address(0) - 3);
+    if (spi_flash_cache_enabled()) { // strings may be in flash cache
+        ets_printf("file: \"%s\" line %d\nfunc: %s\nexpression: %s\n", file, line, function, expression);
+    }
+}
+
+#define ERROR_RETURN(x, fail) do {                                      \
+        esp_err_t __err_rc = (x);                                       \
+        if (__err_rc != ESP_OK) {                                       \
+            _error_check_failed(__err_rc, __FILE__, __LINE__,           \
+                                __ASSERT_FUNC, #x);                     \
+            return fail;                                                \
+        }                                                               \
+    } while(0);
 
 //////////////////////////////////////////////////////////////////////
 // Sensor Function
@@ -143,15 +175,18 @@ static cJSON *sense_json(uint32_t battery_volt, wifi_ap_record_t *ap_record,
 
     for (uint32_t i = 0; i < ulp_sense_count; i++) {
         cJSON *item = cJSON_CreateObject();
+        uint32_t index = ulp_sense_count - i - 1;
+
         cJSON_AddNumberToObject(item, "rain", sense_data[i].rainfall * 0.5);
         cJSON_AddStringToObject(item, "hostname", WIFI_HOSTNAME);
-        cJSON_AddNumberToObject(item, "self_time", SENSE_INTERVAL * i); // negative offset
+        cJSON_AddNumberToObject(item, "self_time", SENSE_INTERVAL * index); // negative offset
 
-        if (i == 0) {
+        if (index == 0) {
             cJSON_AddNumberToObject(item, "battery", battery_volt);
             cJSON_AddNumberToObject(item, "wifi_ch", ap_record->primary);
             cJSON_AddNumberToObject(item, "wifi_rssi", ap_record->rssi);
             cJSON_AddNumberToObject(item, "wifi_con_msec", wifi_con_msec);
+            cJSON_AddNumberToObject(item, "retry", ulp_sense_count - SENSE_BUF_FULL);
         }
 
         cJSON_AddItemToArray(root, item);
@@ -160,16 +195,17 @@ static cJSON *sense_json(uint32_t battery_volt, wifi_ap_record_t *ap_record,
     return root;
 }
 
-static void process_sense_data(uint32_t connect_msec, uint32_t battery_volt)
+static bool process_sense_data(uint32_t connect_msec, uint32_t battery_volt)
 {
     wifi_ap_record_t ap_record;
     char buffer[sizeof(EXPECTED_RESPONSE)];
+    bool result = false;
 
-    ESP_ERROR_CHECK(esp_wifi_sta_get_ap_info(&ap_record));
+    ERROR_RETURN(esp_wifi_sta_get_ap_info(&ap_record), false);
 
     int sock = connect_server();
     if (sock == -1) {
-        return;
+        return false;
     }
 
     cJSON *json = sense_json(battery_volt, &ap_record, connect_msec);
@@ -189,10 +225,14 @@ static void process_sense_data(uint32_t connect_msec, uint32_t battery_volt)
             break;
         }
         ESP_LOGI(TAG, "FLUENTD POST SUCCESSFUL");
+
+        result = true;
     } while (0);
 
     close(sock);
     cJSON_Delete(json);
+
+    return result;
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -202,8 +242,8 @@ static esp_err_t event_handler(void *ctx, system_event_t *event)
     switch(event->event_id) {
     case SYSTEM_EVENT_STA_START:
         ESP_LOGI(TAG, "SYSTEM_EVENT_STA_START");
-        ESP_ERROR_CHECK(tcpip_adapter_set_hostname(TCPIP_ADAPTER_IF_STA, WIFI_HOSTNAME));
-        ESP_ERROR_CHECK(esp_wifi_connect());
+        ERROR_RETURN(tcpip_adapter_set_hostname(TCPIP_ADAPTER_IF_STA, WIFI_HOSTNAME), ESP_FAIL);
+        ERROR_RETURN(esp_wifi_connect(), ESP_FAIL);
         break;
     case SYSTEM_EVENT_STA_GOT_IP:
         ESP_LOGI(TAG, "SYSTEM_EVENT_STA_GOT_IP");
@@ -219,25 +259,25 @@ static esp_err_t event_handler(void *ctx, system_event_t *event)
     return ESP_OK;
 }
 
-static void init_wifi()
+static bool wifi_init()
 {
     esp_err_t ret;
 
     ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES) {
-        ESP_ERROR_CHECK(nvs_flash_erase());
+        ERROR_RETURN(nvs_flash_erase(), false);
         ret = nvs_flash_init();
     }
-    ESP_ERROR_CHECK(ret);
+    ERROR_RETURN(ret, false);
 
     tcpip_adapter_init();
 
-    ESP_ERROR_CHECK(esp_event_loop_init(event_handler, NULL));
+    ERROR_RETURN(esp_event_loop_init(event_handler, NULL), false);
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
 
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+    ERROR_RETURN(esp_wifi_init(&cfg), false);
+    ERROR_RETURN(esp_wifi_set_mode(WIFI_MODE_STA), false);
 
 #ifdef WIFI_SSID
     wifi_config_t wifi_config = {
@@ -247,53 +287,66 @@ static void init_wifi()
         },
     };
     wifi_config_t wifi_config_cur;
-    ESP_ERROR_CHECK(esp_wifi_get_config(WIFI_IF_STA, &wifi_config_cur));
+    ERROR_RETURN(esp_wifi_get_config(WIFI_IF_STA, &wifi_config_cur), false);
 
     if (strcmp((const char *)wifi_config_cur.sta.ssid, (const char *)wifi_config.sta.ssid) ||
         strcmp((const char *)wifi_config_cur.sta.password, (const char *)wifi_config.sta.password)) {
         ESP_LOGI(TAG, "SAVE WIFI CONFIG");
-        ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config));
+        ERROR_RETURN(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config), false);
     }
 #endif
+
+    return true;
 }
 
-static esp_err_t wifi_connect()
+static bool wifi_connect()
 {
     xSemaphoreTake(wifi_conn_done, portMAX_DELAY);
-    ESP_ERROR_CHECK(esp_wifi_start());
+    ERROR_RETURN(esp_wifi_start(), false);
     if (xSemaphoreTake(wifi_conn_done, 10000 / portTICK_RATE_MS) == pdTRUE) {
-        return ESP_OK;
+        return true;
     } else {
-        ESP_LOGE(TAG, "WIFI CONNECT TIMECOUT")
-        return ESP_FAIL;
+        ESP_LOGE(TAG, "WIFI CONNECT TIMECOUT");
+        return false;
     }
 }
 
-static void wifi_disconnect()
+static bool wifi_stop()
 {
-    ESP_ERROR_CHECK(esp_wifi_disconnect());
-    ESP_ERROR_CHECK(esp_wifi_stop());
+    ERROR_RETURN(esp_wifi_disconnect(), false);
+    ERROR_RETURN(esp_wifi_stop(), false);
+
+    return true;
 }
 
 //////////////////////////////////////////////////////////////////////
 // ULP Function
 static void init_ulp_program()
 {
-    gpio_num_t gpio_num = GAUGE_PIN;
-    ESP_ERROR_CHECK(rtc_gpio_init(GAUGE_PIN));
-    rtc_gpio_set_direction(gpio_num, RTC_GPIO_MODE_INPUT_ONLY);
-    rtc_gpio_pulldown_dis(gpio_num);
-    rtc_gpio_pullup_dis(gpio_num);
-    rtc_gpio_hold_en(gpio_num);
-
     ESP_ERROR_CHECK(
         ulp_load_binary(
             0, ulp_main_bin_start,
             (ulp_main_bin_end - ulp_main_bin_start) / sizeof(uint32_t)
         )
     );
+    ulp_gpio_num = GAUGE_PIN_ULP;
+    ulp_predecessing_zero = true;
 
-    ulp_gpio_num = 8;
+    ESP_ERROR_CHECK(rtc_gpio_init(GAUGE_PIN));
+    rtc_gpio_set_direction(GAUGE_PIN, RTC_GPIO_MODE_INPUT_ONLY);
+    rtc_gpio_pulldown_en(GAUGE_PIN);
+    rtc_gpio_pullup_dis(GAUGE_PIN);
+    rtc_gpio_hold_en(GAUGE_PIN);
+
+    REG_SET_FIELD(SENS_ULP_CP_SLEEP_CYC0_REG, SENS_SLEEP_CYCLES_S0,
+                  rtc_clk_slow_freq_get_hz());
+
+    // MEMO: EDP-IDF のサンプル(ulp_example_main.c)にある下記を，
+    // 両端子共に open の手元の ESP32 に行うと消費電流がulp_set_wakeup_period増えた．詳細不明．
+    /* GPIO12: select flash voltage */
+    /* GPIO15: suppress boot messages */
+    /* rtc_gpio_isolate(GPIO_NUM_12); */
+    /* rtc_gpio_isolate(GPIO_NUM_15); */
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -318,9 +371,12 @@ static bool handle_ulp_sense_data()
     ulp_edge_count = 0;
 
     sense_data_t *sense_data = (sense_data_t *)&ulp_sense_data;
-
     sense_data[ulp_sense_count++].rainfall = edge_count;
-    ulp_edge_count = 0;
+
+    ESP_LOGI(TAG, "SENSE_COUNT: %d / %d", ulp_sense_count, SENSE_BUF_FULL);
+    if (edge_count != 0) {
+        ESP_LOGW(TAG, "EDGE_COUNT = %d", edge_count);
+    }
 
     // check if it began to rain
     if ((edge_count != 0) && ulp_predecessing_zero) {
@@ -334,7 +390,7 @@ static bool handle_ulp_sense_data()
     }
 
     // check if the buffer is full
-    if (ulp_sense_count >= SENSE_BUF_MAX) {
+    if (ulp_sense_count >= SENSE_BUF_FULL) {
         ulp_predecessing_zero = sense_data_all_zero();
         return true;
     }
@@ -349,6 +405,9 @@ void app_main()
     uint32_t battery_volt;
     uint32_t connect_msec;
 
+#ifdef ADC_CALIB_MODE
+    ESP_ERROR_CHECK(adc2_vref_to_gpio(GPIO_NUM_25));
+#else
     vSemaphoreCreateBinary(wifi_conn_done);
 
     battery_volt = get_battery_voltage();
@@ -357,22 +416,34 @@ void app_main()
 
     if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER) {
         if (handle_ulp_sense_data()) {
+            bool status = false;
             ESP_LOGI(TAG, "Send to fluentd");
             time_start = xTaskGetTickCount();
-            init_wifi();
-            if (wifi_connect() == ESP_OK) {
+
+            if (wifi_init() && wifi_connect()) {
                 connect_msec = (xTaskGetTickCount() - time_start) * portTICK_PERIOD_MS;
-                process_sense_data(connect_msec, battery_volt);
+                status = process_sense_data(connect_msec, battery_volt);
             }
-            wifi_disconnect();
-            ulp_sense_count = 0;
+            wifi_stop();
+
+            if (status) {
+                ulp_sense_count = 0;
+            } else if (ulp_sense_count >= SENSE_BUF_MAX) {
+                // count has reached max
+                ulp_sense_count = 0;
+            }
         }
     } else {
         init_ulp_program();
+        ulp_set_wakeup_period(0, 1000*30); // 30ms
         ESP_ERROR_CHECK(ulp_run((&ulp_entry - RTC_SLOW_MEM) / sizeof(uint32_t)));
     }
 
     ESP_LOGI(TAG, "Go to sleep");
-    ESP_ERROR_CHECK(esp_deep_sleep_enable_timer_wakeup(SENSE_INTERVAL * 1000000LL));
+
+    ESP_ERROR_CHECK(esp_sleep_enable_timer_wakeup(SENSE_INTERVAL * 1000000LL));
+
+    vTaskDelay(10 / portTICK_RATE_MS); // wait 10ms for flush UART
     esp_deep_sleep_start();
+#endif
 }

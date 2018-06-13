@@ -14,16 +14,16 @@
 
 #include "util_macro.S"
 
-.set LOW_HYST_BIT,7
-.set SENSE_BUF_SIZE,256
+.set LOW_HYST_BIT,3
+.set SENSE_BUF_SIZE,512
     
     .bss
     .global gpio_num
 gpio_num: .long 0
 
-    // 0: previous state is high and detect down edge
-    // 1: previous state is low and check high level continuity
-    // 2: previous state low
+    // 0: previous state is low
+    // 1: previous state is low check low level continuity
+    // 2: previous state high
     .global watch_state
 watch_state: .long 0
 
@@ -61,7 +61,7 @@ entry:
 loop:
     psr
     jump watch
-    jump loop
+    halt
 
 watch:
     READ_RTC_FIELD(RTC_GPIO_IN_REG, RTC_GPIO_IN_NEXT)
@@ -93,13 +93,13 @@ watch_end:
     ret
     
     ////////////////////////////////////////////////////////////
-    // previous state is high and detect down edge
+    // previous state is low
 watch_state_0:
     pop r0 // gpio level
-    jumpr _state_0_to_2, 1, lt
+    jumpr _state_0_to_2, 1, ge
     ret
     
-_state_0_to_2: // down edge detected
+_state_0_to_2: // up edge detected
     //  increase edge count
     move r1, edge_count
     ld r2, r1, 0
@@ -113,10 +113,10 @@ _state_0_to_2: // down edge detected
     ret
 
     ////////////////////////////////////////////////////////////
-    // previous state is low and check high state continuity
+    // previous state is low and check low state continuity
 watch_state_1: 
     pop r0 // gpio level
-    jumpr _state_1_to_2, 1, lt
+    jumpr _state_1_to_2, 1, ge
     
     //  increase high continuity count
     move r1, continue_count
@@ -146,7 +146,7 @@ _state_1_to_2:
     // previous state low
 watch_state_2:
     pop r0 // gpio level
-    jumpr _state_2_to_1, 1, ge
+    jumpr _state_2_to_1, 1, lt
     jump watch_end
     
 _state_2_to_1:
