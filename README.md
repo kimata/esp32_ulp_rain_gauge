@@ -5,5 +5,6 @@ Fluentd.
 
 By using low power ULP, it can powered by AAA batteries.
 
-
- 
+# Pin assign
+* GPIO25: Rain gauge (pull down)
+* GPIO32: Battery voltage monitor (A/D)
