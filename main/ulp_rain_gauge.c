@@ -186,7 +186,11 @@ static cJSON *sense_json(uint32_t battery_volt, wifi_ap_record_t *ap_record,
             cJSON_AddNumberToObject(item, "wifi_ch", ap_record->primary);
             cJSON_AddNumberToObject(item, "wifi_rssi", ap_record->rssi);
             cJSON_AddNumberToObject(item, "wifi_con_msec", wifi_con_msec);
-            cJSON_AddNumberToObject(item, "retry", ulp_sense_count - SENSE_BUF_FULL);
+            if (ulp_sense_count < SENSE_BUF_FULL) {
+                cJSON_AddNumberToObject(item, "retry", 0);
+            } else {
+                cJSON_AddNumberToObject(item, "retry", ulp_sense_count - SENSE_BUF_FULL);
+            }
         }
 
         cJSON_AddItemToArray(root, item);
@@ -415,6 +419,7 @@ void app_main()
     esp_log_level_set("wifi", ESP_LOG_ERROR);
 
     if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER) {
+        ulp_sense_count = ulp_sense_count & 0xFFFF; // mask
         if (handle_ulp_sense_data()) {
             bool status = false;
             ESP_LOGI(TAG, "Send to fluentd");
@@ -435,6 +440,7 @@ void app_main()
         }
     } else {
         init_ulp_program();
+        ulp_sense_count = 0;
         ulp_set_wakeup_period(0, 1000*30); // 30ms
         ESP_ERROR_CHECK(ulp_run((&ulp_entry - RTC_SLOW_MEM) / sizeof(uint32_t)));
     }
