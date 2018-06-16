@@ -66,7 +66,7 @@ const uint16_t   GAUGE_PIN_ULP= 6;
 #define BATTERY_ADC_DIV  1
 
 ////////////////////////////////////////////////////////////
-#define WIFI_CONNECT_TIMEOUT 10
+#define WIFI_CONNECT_TIMEOUT 3
 
 typedef struct sense_data {
     uint16_t rainfall;
@@ -303,7 +303,7 @@ static bool wifi_connect()
 {
     xSemaphoreTake(wifi_conn_done, portMAX_DELAY);
     ERROR_RETURN(esp_wifi_start(), false);
-    if (xSemaphoreTake(wifi_conn_done, 10000 / portTICK_RATE_MS) == pdTRUE) {
+    if (xSemaphoreTake(wifi_conn_done, WIFI_CONNECT_TIMEOUT * 1000 / portTICK_RATE_MS) == pdTRUE) {
         return true;
     } else {
         ESP_LOGE(TAG, "WIFI CONNECT TIMECOUT");
@@ -313,8 +313,8 @@ static bool wifi_connect()
 
 static bool wifi_stop()
 {
-    ERROR_RETURN(esp_wifi_disconnect(), false);
-    ERROR_RETURN(esp_wifi_stop(), false);
+    esp_wifi_disconnect();
+    esp_wifi_stop();
 
     return true;
 }
@@ -443,7 +443,7 @@ void app_main()
 
     ESP_ERROR_CHECK(esp_sleep_enable_timer_wakeup(SENSE_INTERVAL * 1000000LL));
 
-    vTaskDelay(10 / portTICK_RATE_MS); // wait 10ms for flush UART
+    vTaskDelay(20 / portTICK_RATE_MS); // wait 20ms for flush UART
     esp_deep_sleep_start();
 #endif
 }
