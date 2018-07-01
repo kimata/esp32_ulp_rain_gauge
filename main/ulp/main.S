@@ -15,9 +15,11 @@
 #include "util_macro.S"
 
 .set LOW_HYST_BIT,3
-.set SENSE_BUF_SIZE,512
-    
+.set SENSE_BUF_SIZE,128
+
     .bss
+    .balign 4
+
     .global gpio_num
 gpio_num: .long 0
 
@@ -29,7 +31,6 @@ watch_state: .long 0
 
     .global gpio_level
 gpio_level: .long 0
-    
     .global edge_count
 edge_count: .long 0
     
@@ -38,11 +39,9 @@ continue_count: .long 0
 
     .global predecessing_zero
 predecessing_zero: .long 0
-    
     .global sense_count
 sense_count: .long 0
 
-    .balign 4
     .global sense_data
 sense_data: .long 0
     .skip SENSE_BUF_SIZE
