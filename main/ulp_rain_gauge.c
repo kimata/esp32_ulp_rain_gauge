@@ -132,6 +132,7 @@ uint32_t get_battery_voltage(void)
 {
     uint32_t ad_volt_list[BATTERY_ADC_SAMPLE];
     esp_adc_cal_characteristics_t characteristics;
+    uint32_t voltage;
 
     adc1_config_width(ADC_WIDTH_BIT_12);
     adc1_config_channel_atten(BATTERY_ADC_CH, ADC_ATTEN_11db);
@@ -147,7 +148,11 @@ uint32_t get_battery_voltage(void)
           (int (*)(const void *, const void *))cmp_volt);
 
     // mean value
-    return ad_volt_list[BATTERY_ADC_SAMPLE >> 1] * BATTERY_ADC_DIV;
+    voltage =  ad_volt_list[BATTERY_ADC_SAMPLE >> 1] * BATTERY_ADC_DIV;
+
+    ESP_LOGI(TAG, "BATTERY: %.2f V", voltage / 1000.0);
+
+    return voltage;
 }
 
 //////////////////////////////////////////////////////////////////////
