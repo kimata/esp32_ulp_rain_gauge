@@ -61,9 +61,13 @@
 const gpio_num_t GAUGE_PIN    = GPIO_NUM_25;
 const uint16_t   GAUGE_PIN_ULP= 6;
 
+const gpio_num_t BYPASS_PIN   = GPIO_NUM_14;
+
 #define BATTERY_ADC_CH  ADC1_CHANNEL_5  // GPIO 33
 #define BATTERY_ADC_SAMPLE  33
 #define BATTERY_ADC_DIV  1
+
+#define BATTERY_THRESHOLD 2400              // battery threshold
 
 ////////////////////////////////////////////////////////////
 #define WIFI_CONNECT_TIMEOUT 3
@@ -336,16 +340,19 @@ static void init_ulp_program()
     ulp_predecessing_zero = true;
 
     ESP_ERROR_CHECK(rtc_gpio_init(GAUGE_PIN));
-    rtc_gpio_set_direction(GAUGE_PIN, RTC_GPIO_MODE_INPUT_ONLY);
-    rtc_gpio_pulldown_en(GAUGE_PIN);
-    rtc_gpio_pullup_dis(GAUGE_PIN);
-    rtc_gpio_hold_en(GAUGE_PIN);
+    ESP_ERROR_CHECK(rtc_gpio_set_direction(GAUGE_PIN, RTC_GPIO_MODE_INPUT_ONLY));
+    ESP_ERROR_CHECK(rtc_gpio_pulldown_en(GAUGE_PIN));
+    ESP_ERROR_CHECK(rtc_gpio_pullup_dis(GAUGE_PIN));
+    ESP_ERROR_CHECK(rtc_gpio_hold_en(GAUGE_PIN));
+
+    ESP_ERROR_CHECK(rtc_gpio_init(BYPASS_PIN));
+    ESP_ERROR_CHECK(rtc_gpio_set_direction(BYPASS_PIN, RTC_GPIO_MODE_OUTPUT_ONLY));
 
     REG_SET_FIELD(SENS_ULP_CP_SLEEP_CYC0_REG, SENS_SLEEP_CYCLES_S0,
                   rtc_clk_slow_freq_get_hz());
 
     // MEMO: EDP-IDF のサンプル(ulp_example_main.c)にある下記を，
-    // 両端子共に open の手元の ESP32 に行うと消費電流がulp_set_wakeup_period増えた．詳細不明．
+    // 両端子共に open の手元の ESP32 に行うと消費電流が増えた．詳細不明．
     /* GPIO12: select flash voltage */
     /* GPIO15: suppress boot messages */
     /* rtc_gpio_isolate(GPIO_NUM_12); */
@@ -442,6 +449,15 @@ void app_main()
         ulp_sense_count = 0;
         ulp_set_wakeup_period(0, 1000*30); // 30ms
         ESP_ERROR_CHECK(ulp_run((&ulp_entry - RTC_SLOW_MEM) / sizeof(uint32_t)));
+    }
+
+    // ULP program parameter
+    if (battery_volt > BATTERY_THRESHOLD) {
+        ESP_LOGI(TAG, "Enable TPS61291 bypass mode");
+        ulp_bypass_mode_enable = 1;
+    } else {
+        ESP_LOGI(TAG, "Disable TPS61291 bypass mode");
+        ulp_bypass_mode_enable = 0;
     }
 
     ESP_LOGI(TAG, "Go to sleep");
