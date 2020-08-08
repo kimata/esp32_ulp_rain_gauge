@@ -52,7 +52,7 @@ watch_state: .long 0
 gpio_level: .long 0
     .global edge_count
 edge_count: .long 0
-    
+
     .global continue_count
 continue_count: .long 0
 
@@ -64,7 +64,7 @@ sense_count: .long 0
     .global sense_data
 sense_data: .long 0
     .skip SENSE_BUF_SIZE
-    
+
 stack:
     .skip 32
     .global stackEnd

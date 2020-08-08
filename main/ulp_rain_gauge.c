@@ -55,6 +55,9 @@
 #define SENSE_BUF_FULL  30              // full buffering count
 #define SENSE_BUF_MAX   120             // max buffering count
 
+#define COUNT_MM        0.5             // 1 count = 0.5mm
+#define RAINFALL_MAX_PH 200             // maximum rainfall per hour
+
 #define ADC_VREF        1100            // ADC calibration data
 
 ////////////////////////////////////////////////////////////
