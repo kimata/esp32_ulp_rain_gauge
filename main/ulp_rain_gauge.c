@@ -88,6 +88,8 @@ extern const uint8_t ulp_main_bin_end[]   asm("_binary_ulp_main_bin_end");
     "json=%s"
 
 SemaphoreHandle_t wifi_conn_done = NULL;
+esp_event_handler_instance_t wifi_handler_any_id = NULL;
+esp_event_handler_instance_t wifi_handler_got_ip = NULL;
 
 //////////////////////////////////////////////////////////////////////
 // Error Handling
@@ -243,23 +245,21 @@ static bool process_sense_data(uint32_t battery_volt, wifi_ap_record_t *ap_info,
 //////////////////////////////////////////////////////////////////////
 // Wifi Function
 static void event_handler(void* arg, esp_event_base_t event_base,
-                                int32_t event_id, void* event_data)
+                          int32_t event_id, void* event_data)
 {
-    if (event_base == WIFI_EVENT) {
-        if (event_id == WIFI_EVENT_STA_START) {
-            ESP_LOGI(TAG, "Event: SYSTEM_EVENT_STA_START");
-            ESP_ERROR_CHECK(esp_wifi_connect());
-        } else if (event_id == WIFI_EVENT_STA_CONNECTED) {
-            ESP_ERROR_CHECK(tcpip_adapter_set_hostname(TCPIP_ADAPTER_IF_STA, WIFI_HOSTNAME));
-        } else if (event_id == WIFI_EVENT_STA_DISCONNECTED) {
-            ESP_LOGI(TAG, "Event: SYSTEM_EVENT_STA_DISCONNECTED");
-            xSemaphoreGive(wifi_conn_done);
-        }
-    } else if (event_base == IP_EVENT) {
-        if (event_id == IP_EVENT_STA_GOT_IP) {
-            ESP_LOGI(TAG, "Event: SYSTEM_EVENT_STA_GOT_IP");
-            xSemaphoreGive(wifi_conn_done);
-        }
+    static uint32_t retry = 0;
+
+    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
+        ESP_ERROR_CHECK(esp_wifi_connect());
+    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+        retry++;
+        esp_wifi_connect();
+        ESP_LOGI(TAG, "Retry to connect to the AP (n=%d)", retry);
+    } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
+        ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
+        ESP_LOGI(TAG, "Got IP: " IPSTR, IP2STR(&event->ip_info.ip));
+        retry = 0;
+        xSemaphoreGive(wifi_conn_done);
     }
 }
 
@@ -274,16 +274,16 @@ static bool wifi_init()
     }
     ERROR_RETURN(ret, false);
 
-    tcpip_adapter_init();
+    ERROR_RETURN(esp_netif_init(), false);
+    ERROR_RETURN(esp_event_loop_create_default(), false);
 
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
-    ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &event_handler, NULL));
-    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &event_handler, NULL));
+    esp_netif_t *esp_netif = esp_netif_create_default_wifi_sta();
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
 
     ERROR_RETURN(esp_wifi_init(&cfg), false);
     ERROR_RETURN(esp_wifi_set_mode(WIFI_MODE_STA), false);
+    ERROR_RETURN(esp_wifi_set_storage(WIFI_STORAGE_RAM), false);
 
 #ifdef WIFI_SSID
     wifi_config_t wifi_config = {
@@ -302,12 +302,23 @@ static bool wifi_init()
     }
 #endif
 
+    ERROR_RETURN(esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID,
+                                                     &event_handler, NULL, &wifi_handler_any_id),
+                 false);
+
+    ERROR_RETURN(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP,
+                                                     &event_handler, NULL, &wifi_handler_got_ip),
+                 false);
+
+    ERROR_RETURN(esp_netif_set_hostname(esp_netif, WIFI_HOSTNAME), false);
+
     return true;
 }
 
 static bool wifi_connect(wifi_ap_record_t *ap_info)
 {
     xSemaphoreTake(wifi_conn_done, portMAX_DELAY);
+
     ERROR_RETURN(esp_wifi_start(), false);
     if (xSemaphoreTake(wifi_conn_done, WIFI_CONNECT_TIMEOUT * 1000 / portTICK_RATE_MS) == pdTRUE) {
         ERROR_RETURN(esp_wifi_sta_get_ap_info(ap_info), false);
@@ -320,6 +331,13 @@ static bool wifi_connect(wifi_ap_record_t *ap_info)
 
 static bool wifi_stop()
 {
+    esp_event_handler_instance_unregister(IP_EVENT,
+                                          IP_EVENT_STA_GOT_IP,
+                                          wifi_handler_got_ip);
+    esp_event_handler_instance_unregister(WIFI_EVENT,
+                                          ESP_EVENT_ANY_ID,
+                                          wifi_handler_any_id);
+
     esp_wifi_disconnect();
     esp_wifi_stop();
 
