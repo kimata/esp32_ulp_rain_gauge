@@ -187,8 +187,13 @@ static cJSON *sense_json(uint32_t battery_volt, wifi_ap_record_t *ap_info,
     for (uint32_t i = 0; i < ulp_sense_count; i++) {
         cJSON *item = cJSON_CreateObject();
         uint32_t index = ulp_sense_count - i - 1;
+        float rainfall = sense_data[i].rainfall * COUNT_MM;
 
-        cJSON_AddNumberToObject(item, "rain", sense_data[i].rainfall * 0.5);
+        if (rainfall > (RAINFALL_MAX_PH/60)) {
+          rainfall = RAINFALL_MAX_PH / 60.0;
+        }
+
+        cJSON_AddNumberToObject(item, "rain", rainfall);
         cJSON_AddStringToObject(item, "hostname", WIFI_HOSTNAME);
         cJSON_AddNumberToObject(item, "self_time", SENSE_INTERVAL * index); // negative offset
 
