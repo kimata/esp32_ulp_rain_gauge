@@ -376,9 +376,6 @@ static void init_ulp_program()
     ESP_ERROR_CHECK(rtc_gpio_pullup_dis(GAUGE_PIN));
     ESP_ERROR_CHECK(rtc_gpio_hold_en(GAUGE_PIN));
 
-    ESP_ERROR_CHECK(rtc_gpio_init(BYPASS_PIN));
-    ESP_ERROR_CHECK(rtc_gpio_set_direction(BYPASS_PIN, RTC_GPIO_MODE_OUTPUT_ONLY));
-
     REG_SET_FIELD(SENS_ULP_CP_SLEEP_CYC0_REG, SENS_SLEEP_CYCLES_S0,
                   rtc_clk_slow_freq_get_hz());
 
@@ -439,6 +436,19 @@ static bool handle_ulp_sense_data()
     return false;
 }
 
+void boost_mode_set(uint8_t is_enable)
+{
+    ESP_ERROR_CHECK(rtc_gpio_deinit(BYPASS_PIN));
+    ESP_ERROR_CHECK(rtc_gpio_set_direction(BYPASS_PIN, RTC_GPIO_MODE_OUTPUT_ONLY));
+    ESP_ERROR_CHECK(rtc_gpio_set_level(BYPASS_PIN, is_enable));
+}
+
+void boost_mode_rtc_ctrl()
+{
+    ESP_ERROR_CHECK(rtc_gpio_init(BYPASS_PIN));
+    ESP_ERROR_CHECK(rtc_gpio_set_direction(BYPASS_PIN, RTC_GPIO_MODE_OUTPUT_ONLY));
+}
+
 //////////////////////////////////////////////////////////////////////
 void app_main()
 {
@@ -457,6 +467,8 @@ void app_main()
     esp_log_level_set("wifi", ESP_LOG_ERROR);
 
     if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER) {
+        boost_mode_set(1);
+
         if (handle_ulp_sense_data()) {
             bool status = false;
             ESP_LOGI(TAG, "Send to fluentd");
@@ -475,26 +487,30 @@ void app_main()
                 ulp_sense_count = 0;
             }
         }
+
+        if (battery_volt > BATTERY_THRESHOLD) {
+            ESP_LOGI(TAG, "Set TPS61291 to bypass mode");
+            ulp_boost_mode_enable = 0;
+        } else {
+            ESP_LOGI(TAG, "Set TPS61291 to boost mode");
+            ulp_boost_mode_enable = 1;
+        }
+
+        boost_mode_set(0);
+        boost_mode_rtc_ctrl();
     } else {
         init_ulp_program();
         ulp_sense_count = 0;
+
+        // run ulp program every 30ms
         ulp_set_wakeup_period(0, 1000*30); // 30ms
         ESP_ERROR_CHECK(ulp_run((&ulp_entry - RTC_SLOW_MEM) / sizeof(uint32_t)));
     }
 
-    // ULP program parameter
-    if (battery_volt > BATTERY_THRESHOLD) {
-        ESP_LOGI(TAG, "Enable TPS61291 bypass mode");
-        ulp_bypass_mode_enable = 1;
-    } else {
-        ESP_LOGI(TAG, "Disable TPS61291 bypass mode");
-        ulp_bypass_mode_enable = 0;
-    }
+    ESP_ERROR_CHECK(esp_sleep_enable_timer_wakeup(SENSE_INTERVAL * 1000000LL));
 
     ESP_LOGI(TAG, "Go to sleep");
     vTaskDelay(10 / portTICK_RATE_MS); // wait 10ms for flush UART
-
-    ESP_ERROR_CHECK(esp_sleep_enable_timer_wakeup(SENSE_INTERVAL * 1000000LL));
 
     esp_deep_sleep_start();
 #endif

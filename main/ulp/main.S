@@ -36,8 +36,8 @@
     .bss
     .balign 4
 
-    .global bypass_mode_enable
-bypass_mode_enable: .long 0
+    .global boost_mode_enable
+boost_mode_enable: .long 0
 
     .global gpio_num
 gpio_num: .long 0
@@ -76,10 +76,14 @@ stackEnd:
 entry:
     move r3,stackEnd
 
-    move r2,bypass_mode_enable
+    move r2,boost_mode_enable
     ld r0,r2,0
-    jumpr loop,1,lt
+    jumpr boost_mode,0,gt
     set_bypass_mode
+    jump loop
+
+boost_mode:
+    set_boost_mode
 
 loop:
     psr
