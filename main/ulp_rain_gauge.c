@@ -91,8 +91,6 @@ extern const uint8_t ulp_main_bin_end[]   asm("_binary_ulp_main_bin_end");
     "json=%s"
 
 SemaphoreHandle_t wifi_conn_done = NULL;
-esp_event_handler_instance_t wifi_handler_any_id = NULL;
-esp_event_handler_instance_t wifi_handler_got_ip = NULL;
 
 //////////////////////////////////////////////////////////////////////
 // Error Handling
@@ -315,12 +313,12 @@ static bool wifi_init()
     }
 #endif
 
-    ERROR_RETURN(esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID,
-                                                     &event_handler, NULL, &wifi_handler_any_id),
+    ERROR_RETURN(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID,
+                                            &event_handler, NULL),
                  false);
 
-    ERROR_RETURN(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP,
-                                                     &event_handler, NULL, &wifi_handler_got_ip),
+    ERROR_RETURN(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP,
+                                            &event_handler, NULL),
                  false);
 
     ERROR_RETURN(esp_netif_set_hostname(esp_netif, WIFI_HOSTNAME), false);
@@ -344,12 +342,8 @@ static bool wifi_connect(wifi_ap_record_t *ap_info)
 
 static bool wifi_stop()
 {
-    esp_event_handler_instance_unregister(IP_EVENT,
-                                          IP_EVENT_STA_GOT_IP,
-                                          wifi_handler_got_ip);
-    esp_event_handler_instance_unregister(WIFI_EVENT,
-                                          ESP_EVENT_ANY_ID,
-                                          wifi_handler_any_id);
+    esp_event_handler_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP, &event_handler);
+    esp_event_handler_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, &event_handler);
 
     esp_wifi_disconnect();
     esp_wifi_stop();
