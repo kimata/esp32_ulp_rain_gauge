@@ -45,7 +45,7 @@
 
 ////////////////////////////////////////////////////////////
 // Configuration
-#define FLUENTD_IP      "192.168.2.20"  // IP address of Fluentd
+#define FLUENTD_IP      "192.168.0.10"  // IP address of Fluentd
 #define FLUENTD_PORT    8888            // Port of FLuentd
 #define FLUENTD_TAG     "/sensor"       // Fluentd tag
 
@@ -73,7 +73,7 @@ const gpio_num_t BYPASS_PIN   = GPIO_NUM_14;
 #define BATTERY_THRESHOLD 2400              // battery threshold
 
 ////////////////////////////////////////////////////////////
-#define WIFI_CONNECT_TIMEOUT 3
+#define WIFI_CONNECT_TIMEOUT 5
 
 typedef struct sense_data {
     uint16_t rainfall;
