@@ -64,8 +64,6 @@
 const gpio_num_t GAUGE_PIN    = GPIO_NUM_25;
 const uint16_t   GAUGE_PIN_ULP= 6;
 
-const gpio_num_t BYPASS_PIN   = GPIO_NUM_14;
-
 #define BATTERY_ADC_CH  ADC1_CHANNEL_5  // GPIO 33
 #define BATTERY_ADC_SAMPLE  33
 #define BATTERY_ADC_DIV  1
@@ -430,18 +428,6 @@ static bool handle_ulp_sense_data()
     return false;
 }
 
-void boost_mode_set(uint8_t is_enable)
-{
-    ESP_ERROR_CHECK(rtc_gpio_deinit(BYPASS_PIN));
-    ESP_ERROR_CHECK(rtc_gpio_set_direction(BYPASS_PIN, RTC_GPIO_MODE_OUTPUT_ONLY));
-    ESP_ERROR_CHECK(rtc_gpio_set_level(BYPASS_PIN, is_enable));
-}
-
-void boost_mode_rtc_ctrl()
-{
-    ESP_ERROR_CHECK(rtc_gpio_init(BYPASS_PIN));
-    ESP_ERROR_CHECK(rtc_gpio_set_direction(BYPASS_PIN, RTC_GPIO_MODE_OUTPUT_ONLY));
-}
 
 //////////////////////////////////////////////////////////////////////
 void app_main()
@@ -461,8 +447,6 @@ void app_main()
     esp_log_level_set("wifi", ESP_LOG_ERROR);
 
     if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER) {
-        boost_mode_set(1);
-
         if (handle_ulp_sense_data()) {
             bool status = false;
             ESP_LOGI(TAG, "Send to fluentd");
@@ -481,17 +465,6 @@ void app_main()
                 ulp_sense_count = 0;
             }
         }
-
-        if (battery_volt > BATTERY_THRESHOLD) {
-            ESP_LOGI(TAG, "Set TPS61291 to bypass mode");
-            ulp_boost_mode_enable = 0;
-        } else {
-            ESP_LOGI(TAG, "Set TPS61291 to boost mode");
-            ulp_boost_mode_enable = 1;
-        }
-
-        boost_mode_set(0);
-        boost_mode_rtc_ctrl();
     } else {
         init_ulp_program();
         ulp_sense_count = 0;

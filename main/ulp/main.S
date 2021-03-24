@@ -17,27 +17,8 @@
 .set LOW_HYST_BIT,3
 .set SENSE_BUF_SIZE,128
 
-.set BYPASS_MODE_REG_OFFSET,16 // GPIO_NUM_14
-
-//set TPS61291 Bypass Mode
-.macro set_bypass_mode // Low
-    WRITE_RTC_REG(RTC_IO_TOUCH_PAD6_REG, RTC_IO_TOUCH_PAD6_HOLD_S, 1, 0)
-    WRITE_RTC_REG(RTC_GPIO_OUT_REG,RTC_GPIO_OUT_DATA_S+BYPASS_MODE_REG_OFFSET,1,0)
-    WRITE_RTC_REG(RTC_IO_TOUCH_PAD6_REG, RTC_IO_TOUCH_PAD6_HOLD_S, 1, 1)
-.endm
-
-// set TPS61291 Boost Mode
-.macro set_boost_mode // High
-    WRITE_RTC_REG(RTC_IO_TOUCH_PAD6_REG, RTC_IO_TOUCH_PAD6_HOLD_S, 1, 0)
-    WRITE_RTC_REG(RTC_GPIO_OUT_REG,RTC_GPIO_OUT_DATA_S+BYPASS_MODE_REG_OFFSET,1,1)
-    WRITE_RTC_REG(RTC_IO_TOUCH_PAD6_REG, RTC_IO_TOUCH_PAD6_HOLD_S, 1, 1)
-.endm
-
     .bss
     .balign 4
-
-    .global boost_mode_enable
-boost_mode_enable: .long 0
 
     .global gpio_num
 gpio_num: .long 0
@@ -75,15 +56,6 @@ stackEnd:
     .global entry
 entry:
     move r3,stackEnd
-
-    move r2,boost_mode_enable
-    ld r0,r2,0
-    jumpr boost_mode,0,gt
-    set_bypass_mode
-    jump loop
-
-boost_mode:
-    set_boost_mode
 
 loop:
     psr
@@ -189,8 +161,6 @@ _state_2_to_1:
     jump watch_end
     
 wake_cpu:
-    set_boost_mode
-
     wake
     // stop wake up timer
     WRITE_RTC_FIELD(RTC_CNTL_STATE0_REG, RTC_CNTL_ULP_CP_SLP_TIMER_EN, 0)
