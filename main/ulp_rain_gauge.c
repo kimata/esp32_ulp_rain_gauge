@@ -467,6 +467,7 @@ void app_main()
         }
     } else {
         init_ulp_program();
+        ulp_watch_state = 2;
         ulp_sense_count = 0;
 
         // run ulp program every 30ms
