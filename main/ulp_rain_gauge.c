@@ -66,7 +66,7 @@ const uint16_t   GAUGE_PIN_ULP= 6;
 
 #define BATTERY_ADC_CH  ADC1_CHANNEL_5  // GPIO 33
 #define BATTERY_ADC_SAMPLE  33
-#define BATTERY_ADC_DIV  1
+#define BATTERY_ADC_DIV     2.015
 
 #define BATTERY_THRESHOLD 2400              // battery threshold
 
