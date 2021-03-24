@@ -366,7 +366,7 @@ static void init_ulp_program()
 
     ESP_ERROR_CHECK(rtc_gpio_init(GAUGE_PIN));
     ESP_ERROR_CHECK(rtc_gpio_set_direction(GAUGE_PIN, RTC_GPIO_MODE_INPUT_ONLY));
-    ESP_ERROR_CHECK(rtc_gpio_pulldown_en(GAUGE_PIN));
+    ESP_ERROR_CHECK(rtc_gpio_pulldown_dis(GAUGE_PIN));
     ESP_ERROR_CHECK(rtc_gpio_pullup_dis(GAUGE_PIN));
     ESP_ERROR_CHECK(rtc_gpio_hold_en(GAUGE_PIN));
 
