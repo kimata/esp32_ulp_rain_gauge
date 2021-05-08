@@ -442,6 +442,10 @@ void app_main()
 #ifdef ADC_CALIB_MODE
     ESP_ERROR_CHECK(adc2_vref_to_gpio(GPIO_NUM_25));
 #else
+
+    ESP_ERROR_CHECK(esp_task_wdt_init(30, true));
+    ESP_ERROR_CHECK(esp_task_wdt_add(NULL));
+
     vSemaphoreCreateBinary(wifi_conn_done);
 
     battery_volt = get_battery_voltage();
@@ -451,6 +455,9 @@ void app_main()
     if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER) {
         if (handle_ulp_sense_data()) {
             bool status = false;
+            ulp_sense_count = ulp_sense_count & 0xFFFF; // mask
+            ulp_post_count = ulp_post_count & 0xFFFF; // mask
+
             ESP_LOGI(TAG, "Send to fluentd");
             time_start = xTaskGetTickCount();
 
@@ -463,8 +470,10 @@ void app_main()
             if (status) {
                 ulp_sense_count = 0;
             } else if (ulp_sense_count >= SENSE_BUF_MAX) {
+                ESP_LOGI(TAG, "GIVE UP!");
                 // count has reached max
                 ulp_sense_count = 0;
+                esp_restart();
             }
         }
     } else {
@@ -477,6 +486,8 @@ void app_main()
     }
 
     ESP_ERROR_CHECK(esp_sleep_enable_timer_wakeup(SENSE_INTERVAL * 1000000LL));
+
+    ESP_ERROR_CHECK(esp_task_wdt_delete(NULL));
 
     ESP_LOGI(TAG, "Go to sleep");
     vTaskDelay(10 / portTICK_RATE_MS); // wait 10ms for flush UART
