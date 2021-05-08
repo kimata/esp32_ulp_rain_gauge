@@ -206,6 +206,7 @@ static cJSON *sense_json(uint32_t battery_volt, wifi_ap_record_t *ap_info,
             } else {
                 cJSON_AddNumberToObject(item, "retry", ulp_sense_count - SENSE_BUF_FULL);
             }
+            cJSON_AddNumberToObject(item, "post_count", ulp_post_count);
         }
 
         cJSON_AddItemToArray(root, item);
@@ -241,6 +242,7 @@ static bool process_sense_data(uint32_t battery_volt, wifi_ap_record_t *ap_info,
             break;
         }
         ESP_LOGI(TAG, "FLUENTD POST SUCCESSFUL");
+        ulp_post_count++;
 
         result = true;
     } while (0);

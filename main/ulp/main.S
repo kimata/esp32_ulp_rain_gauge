@@ -23,6 +23,9 @@
     .global gpio_num
 gpio_num: .long 0
 
+    .global post_count
+post_count: .long 0
+
     // 0: previous state is low
     // 1: previous state is low check low level continuity
     // 2: previous state high
